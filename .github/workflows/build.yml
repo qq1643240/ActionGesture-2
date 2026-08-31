@@ -1,0 +1,42 @@
+name: Build ActionGesture
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build-roothide:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup roothide Theos
+        uses: waruhachi/theos-action@v2.4.6
+        with:
+          theos-src: roothide/theos
+          theos-branch: master
+          sdks-src: theos/sdks
+          sdks-branch: master
+      - name: Build RootHide package
+        run: make package SCHEME=roothide FINALPACKAGE=1 RELEASE=1
+      - name: Upload RootHide package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ActionGesture-roothide
+          path: packages/*.deb
+
+  build-rootless:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Theos
+        uses: waruhachi/theos-action@v2.4.6
+      - name: Build rootless package
+        run: make package SCHEME=rootless FINALPACKAGE=1 RELEASE=1
+      - name: Upload rootless package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ActionGesture-rootless
+          path: packages/*.deb
