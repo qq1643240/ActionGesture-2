@@ -47,6 +47,7 @@ void AGWriteLog(NSString *format, ...) {
     @synchronized (ActionGestureHelper.class) {
         NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
         for (NSString *path in @[
+            @"/tmp/ActionGesture.runtime.log",
             @"/var/tmp/com.huami.actiongesture.runtime.log",
             @"/var/mobile/Library/Preferences/com.huami.actiongesture.runtime.log"
         ]) {
