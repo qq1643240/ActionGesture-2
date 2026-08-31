@@ -6,6 +6,7 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <stdarg.h>
+#import <stdio.h>
 #import <unistd.h>
 #if __has_include(<roothide.h>)
 #import <roothide.h>
@@ -44,15 +45,17 @@ void AGWriteLog(NSString *format, ...) {
 
     NSString *line = [message stringByAppendingString:@"\n"];
     @synchronized (ActionGestureHelper.class) {
-        NSString *path = @"/var/mobile/Library/Preferences/com.huami.actiongesture.runtime.log";
-        NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
-        if (!handle) {
-            [[NSFileManager defaultManager] createFileAtPath:path contents:nil attributes:nil];
-            handle = [NSFileHandle fileHandleForWritingAtPath:path];
+        NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
+        for (NSString *path in @[
+            @"/var/tmp/com.huami.actiongesture.runtime.log",
+            @"/var/mobile/Library/Preferences/com.huami.actiongesture.runtime.log"
+        ]) {
+            FILE *file = fopen(path.fileSystemRepresentation, "ab");
+            if (!file) continue;
+            fwrite(data.bytes, 1, data.length, file);
+            fflush(file);
+            fclose(file);
         }
-        [handle seekToEndOfFile];
-        [handle writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
-        [handle closeFile];
     }
     NSLog(@"%@", message);
 }
