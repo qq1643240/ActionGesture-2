@@ -381,7 +381,11 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
         // UIApplication is the public iOS 17 launch path.  The completion
         // handler supplies the real acceptance result; on failure we still
         // let the private workspace fallback try the same URL.
-        if (application && [application respondsToSelector:applicationOpenURLSEL]) {
+        // In SpringBoard, prefer LaunchServices.  UIApplication may report
+        // success while a presentation helper (such as floating-view) owns
+        // the scene; LaunchServices asks SpringBoard to activate the target
+        // application normally and therefore keeps the launch full-screen.
+        if (!workspace && application && [application respondsToSelector:applicationOpenURLSEL]) {
             void (^completion)(BOOL) = ^(BOOL success) {
                 AGWriteLog(@"[ActionGesture] UIApplication URL %@ accepted=%@",
                       candidate, success ? @"YES" : @"NO");
@@ -439,6 +443,25 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
         AGWriteLog(@"[ActionGesture] custom action %@ URL %@ accepted=%@ error=%@",
               action, candidate, opened ? @"YES" : @"NO", error);
         if (opened) return YES;
+    }
+
+    // UIApplication fallback for environments where LaunchServices is not
+    // exposed by the injected SpringBoard process.
+    if (application && [application respondsToSelector:applicationOpenURLSEL]) {
+        for (NSString *candidate in candidates) {
+            NSURL *url = [NSURL URLWithString:candidate];
+            if (!url) continue;
+            __block BOOL accepted = NO;
+            void (^completion)(BOOL) = ^(BOOL success) {
+                accepted = success;
+                AGWriteLog(@"[ActionGesture] UIApplication fallback URL %@ accepted=%@",
+                      candidate, success ? @"YES" : @"NO");
+            };
+            void (*openApplicationURL)(id, SEL, NSURL *, NSDictionary *, void (^)(BOOL)) =
+                (void (*)(id, SEL, NSURL *, NSDictionary *, void (^)(BOOL)))objc_msgSend;
+            openApplicationURL(application, applicationOpenURLSEL, url, nil, completion);
+            if (accepted) return YES;
+        }
     }
     if (workspace && [workspace respondsToSelector:openBundleSEL]) {
         NSString *bundleID = bundleIDs[action];
