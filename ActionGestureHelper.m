@@ -402,6 +402,38 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
     return YES;
 }
 
+- (BOOL)shouldTriggerSingleActionImmediately {
+    if (self.directionModeEnabled) return NO;
+
+    AGGestureConfiguration *singleConfiguration =
+        [self effectiveConfigurationForGesture:AGGestureSingle
+                                     direction:nil
+                             resolvedDirection:nil
+                                   synchronize:YES];
+    NSString *singleAction =
+        [self customActionForGesture:AGGestureSingle direction:nil];
+    if (!singleConfiguration || singleConfiguration.hasArchive ||
+        [singleAction isEqualToString:AGCustomActionNative]) {
+        return NO;
+    }
+
+    // Immediate single delivery is safe only when double/long have no native
+    // action and no custom action that would otherwise be stolen by ButtonDown.
+    for (NSString *gesture in @[ AGGestureDouble, AGGestureLong ]) {
+        AGGestureConfiguration *configuration =
+            [self effectiveConfigurationForGesture:gesture
+                                         direction:nil
+                                 resolvedDirection:nil
+                                       synchronize:NO];
+        NSString *action = [self customActionForGesture:gesture direction:nil];
+        if ((configuration && configuration.hasArchive) ||
+            ![action isEqualToString:AGCustomActionNative]) {
+            return NO;
+        }
+    }
+    return YES;
+}
+
 - (NSTimeInterval)fallbackReloadDelay {
     CFPreferencesAppSynchronize(CFSTR("com.huami.actiongesture"));
     id value = [self preferenceValueForKey:@"fallbackReloadDelayMs"];

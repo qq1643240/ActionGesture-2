@@ -8,6 +8,7 @@ static BOOL AGWaitingForSecondTap;
 static BOOL AGSecondTapInProgress;
 static BOOL AGPassThroughNative;
 static BOOL AGHooksInstalled;
+static BOOL AGImmediateSingleTriggered;
 static NSUInteger AGTapGeneration;
 static id<AGHardwareButtonEvent> AGCurrentButtonDownEvent;
 
@@ -31,8 +32,19 @@ static id<AGHardwareButtonEvent> AGCurrentButtonDownEvent;
     AGPassThroughNative = NO;
     AGButtonIsDown = YES;
     AGDidRecognizeLongPress = NO;
+    AGImmediateSingleTriggered = NO;
     AGCurrentButtonDownEvent = buttonDown;
     AGSecondTapInProgress = AGWaitingForSecondTap;
+
+    if (!AGSecondTapInProgress && [helper shouldTriggerSingleActionImmediately]) {
+        AGImmediateSingleTriggered =
+            [helper executeGesture:AGGestureSingle onButton:self event:buttonDown];
+        if (AGImmediateSingleTriggered) {
+            AGWaitingForSecondTap = NO;
+            ++AGTapGeneration;
+            NSLog(@"[ActionGesture] immediate single custom action consumed ButtonDown");
+        }
+    }
 
     if (AGSecondTapInProgress) {
         AGWaitingForSecondTap = NO;
@@ -49,6 +61,14 @@ static id<AGHardwareButtonEvent> AGCurrentButtonDownEvent;
     }
     if (!AGButtonIsDown) {
         [[ActionGestureHelper sharedHelper] cancelDirectionSampling];
+        return;
+    }
+
+    if (AGImmediateSingleTriggered) {
+        AGDidRecognizeLongPress = YES;
+        AGWaitingForSecondTap = NO;
+        AGSecondTapInProgress = NO;
+        ++AGTapGeneration;
         return;
     }
 
@@ -82,14 +102,17 @@ static id<AGHardwareButtonEvent> AGCurrentButtonDownEvent;
 
     BOOL recognizedLongPress = AGDidRecognizeLongPress;
     BOOL secondTap = AGSecondTapInProgress;
+    BOOL immediateSingle = AGImmediateSingleTriggered;
     id<AGHardwareButtonEvent> event = AGCurrentButtonDownEvent;
 
     AGButtonIsDown = NO;
     AGDidRecognizeLongPress = NO;
     AGSecondTapInProgress = NO;
+    AGImmediateSingleTriggered = NO;
     AGCurrentButtonDownEvent = nil;
 
     if (recognizedLongPress) return;
+    if (immediateSingle) return;
 
     ActionGestureHelper *helper = [ActionGestureHelper sharedHelper];
     if (secondTap) {

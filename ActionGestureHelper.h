@@ -51,6 +51,7 @@ FOUNDATION_EXPORT NSString *const AGCustomActionAlipayPayCode;
                 direction:(nullable NSString *)direction;
 - (NSString *)titleForCustomAction:(NSString *)action;
 - (BOOL)executeCustomAction:(NSString *)action;
+- (BOOL)shouldTriggerSingleActionImmediately;
 - (void)beginSuppressingSystemActionSnapshots;
 - (void)endSuppressingSystemActionSnapshots;
 - (void)systemActionPreferenceDidChangeForKey:(NSString *)key;
