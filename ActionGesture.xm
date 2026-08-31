@@ -17,11 +17,14 @@ static id<AGHardwareButtonEvent> AGCurrentButtonDownEvent;
 - (void)performActionsForButtonDown:(id<AGHardwareButtonEvent>)buttonDown {
     ActionGestureHelper *helper = [ActionGestureHelper sharedHelper];
     if (![helper canHandleButton:self]) {
+        NSLog(@"[ActionGesture] Action Button hook bypassed: runtime not ready");
         [helper cancelDirectionSampling];
         AGPassThroughNative = YES;
         %orig;
         return;
     }
+
+    NSLog(@"[ActionGesture] intercepted Action Button down (%@)", self);
 
     [helper beginDirectionSampling];
     AGPassThroughNative = NO;
@@ -109,9 +112,10 @@ static id<AGHardwareButtonEvent> AGCurrentButtonDownEvent;
         if (![helper executeGesture:AGGestureSingle
                            onButton:self
                               event:event]) {
+            NSLog(@"[ActionGesture] single gesture was not handled; replaying native tap");
             [helper replayNativeTapOnButton:self
                                   downEvent:event
-                                    upEvent:event];
+                                    upEvent:buttonUp];
         }
     });
 }
@@ -127,8 +131,10 @@ static id<AGHardwareButtonEvent> AGCurrentButtonDownEvent;
             return;
         }
         if (![[ActionGestureHelper sharedHelper] prepareSpringBoardRuntime]) {
+            NSLog(@"[ActionGesture] SpringBoard runtime preparation failed; no hook installed");
             return;
         }
+        NSLog(@"[ActionGesture] installing SBRingerHardwareButton hooks");
         %init(ActionGestureSpringBoard);
     }
 }

@@ -976,34 +976,35 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
 }
 
 - (BOOL)prepareSpringBoardRuntime {
+    Class buttonClass = objc_getClass("SBRingerHardwareButton");
+    Class actionControlClass = objc_getClass("SBSystemActionControl");
+    Class linkActionClass = objc_getClass("SBLinkSystemAction");
     Method downMethod =
         class_getInstanceMethod(
-            objc_getClass("SBRingerHardwareButton"),
+            buttonClass,
             @selector(performActionsForButtonDown:));
     Method longPressMethod =
         class_getInstanceMethod(
-            objc_getClass("SBRingerHardwareButton"),
+            buttonClass,
             @selector(performActionsForButtonLongPress:));
     Method upMethod =
         class_getInstanceMethod(
-            objc_getClass("SBRingerHardwareButton"),
+            buttonClass,
             @selector(performActionsForButtonUp:));
 
-    if (!objc_getClass("SBRingerHardwareButton") ||
-        !objc_getClass("SBSystemActionControl") ||
-        !objc_getClass("SBLinkSystemAction") ||
-        !downMethod ||
-        !longPressMethod ||
-        !upMethod ||
-        !class_getInstanceVariable(
-            objc_getClass("SBRingerHardwareButton"), "_systemActionControl") ||
-        !class_getInstanceVariable(
-            objc_getClass("SBSystemActionControl"), "_dataSource") ||
-        !class_getInstanceMethod(
-            objc_getClass("SBLinkSystemAction"),
-            @selector(initWithConfiguredAction:))) {
+    if (!buttonClass || !downMethod || !longPressMethod || !upMethod) {
+        NSLog(@"[ActionGesture] SpringBoard hook unavailable: button=%@ down=%@ long=%@ up=%@",
+              buttonClass, downMethod ? @"YES" : @"NO",
+              longPressMethod ? @"YES" : @"NO",
+              upMethod ? @"YES" : @"NO");
         return NO;
     }
+
+    NSLog(@"[ActionGesture] SpringBoard classes: button=%@ control=%@ linkAction=%@ controlIvar=%@ dataSourceIvar=%@ linkInit=%@",
+          buttonClass, actionControlClass, linkActionClass,
+          class_getInstanceVariable(buttonClass, "_systemActionControl") ? @"YES" : @"NO",
+          class_getInstanceVariable(actionControlClass, "_dataSource") ? @"YES" : @"NO",
+          class_getInstanceMethod(linkActionClass, @selector(initWithConfiguredAction:)) ? @"YES" : @"NO");
 
     self.originalButtonDown =
         (AGButtonEventIMP)method_getImplementation(downMethod);
@@ -1029,11 +1030,11 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
 }
 
 - (BOOL)canHandleButton:(SBRingerHardwareButton *)button {
-    return self.originalButtonDown &&
-           self.originalButtonLongPress &&
-           self.originalButtonUp &&
-           [[self dataSourceForButton:button]
-               respondsToSelector:@selector(setSelectedSystemAction:)];
+    // The data source is only needed when restoring a native system action.
+    // It must not disable the gesture hook: custom URL actions execute even
+    // when iOS 17 changes the private Action Button data-source ivars.
+    return button && self.originalButtonDown &&
+           self.originalButtonLongPress && self.originalButtonUp;
 }
 
 - (SBLinkSystemAction *)systemActionForAssignmentIdentifier:
@@ -1159,6 +1160,9 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
 
     NSString *customAction = [self customActionForGesture:gesture
                                                  direction:direction];
+    NSLog(@"[ActionGesture] execute %@ direction=%@ resolved=%@ nativeArchive=%@ customAction=%@",
+          gesture, direction ?: @"all", resolvedDirection ?: @"baseline",
+          configuration.hasArchive ? @"YES" : @"NO", customAction);
     if (![customAction isEqualToString:AGCustomActionNative] &&
         !configuration.hasArchive) {
         return [self executeCustomAction:customAction];
@@ -1189,6 +1193,18 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
                 });
         }
         selected = applied;
+    }
+
+    // "Nothing" is represented by an empty native archive.  It is a real
+    // handled assignment, not a request to replay the original button event.
+    // Replaying here makes iOS show the Action Button/Dynamic Island feedback
+    // and was the reason the Nothing action appeared to flash without doing
+    // anything.
+    if ([customAction isEqualToString:AGCustomActionNative] &&
+        !configuration.hasArchive) {
+        NSLog(@"[ActionGesture] %@ resolved to Nothing; consuming event without native replay",
+              gesture);
+        return YES;
     }
     return selected && [self replayNativeActionOnButton:button event:event];
 }
