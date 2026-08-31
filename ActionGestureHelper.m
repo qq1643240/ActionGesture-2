@@ -62,25 +62,28 @@ void AGWriteLog(NSString *format, ...) {
 }
 
 static void AGLogRuntimeMethods(Class cls) {
-    if (!cls) return;
-    unsigned int count = 0;
-    Method *methods = class_copyMethodList(cls, &count);
-    AGWriteLog(@"[ActionGesture] runtime methods %@ count=%u", NSStringFromClass(cls), count);
-    for (unsigned int index = 0; index < count; index++) {
-        SEL selector = method_getName(methods[index]);
-        const char *name = sel_getName(selector);
-        if (!name) continue;
-        NSString *selectorName = NSStringFromSelector(selector);
-        if ([selectorName rangeOfString:@"action" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-            [selectorName rangeOfString:@"button" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-            [selectorName rangeOfString:@"execute" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-            [selectorName rangeOfString:@"perform" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-            [selectorName rangeOfString:@"activate" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-            AGWriteLog(@"[ActionGesture] runtime selector %@ args=%u", selectorName,
-                  method_getNumberOfArguments(methods[index]));
+    for (Class current = cls; current && current != NSObject.class;
+         current = class_getSuperclass(current)) {
+        unsigned int count = 0;
+        Method *methods = class_copyMethodList(current, &count);
+        AGWriteLog(@"[ActionGesture] runtime methods %@ count=%u",
+              NSStringFromClass(current), count);
+        for (unsigned int index = 0; index < count; index++) {
+            SEL selector = method_getName(methods[index]);
+            NSString *selectorName = NSStringFromSelector(selector);
+            if ([selectorName rangeOfString:@"action" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [selectorName rangeOfString:@"button" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [selectorName rangeOfString:@"execute" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [selectorName rangeOfString:@"perform" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [selectorName rangeOfString:@"activate" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [selectorName rangeOfString:@"invoke" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [selectorName rangeOfString:@"trigger" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                AGWriteLog(@"[ActionGesture] runtime selector %@ args=%u",
+                      selectorName, method_getNumberOfArguments(methods[index]));
+            }
         }
+        free(methods);
     }
-    free(methods);
 }
 
 typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
@@ -1152,6 +1155,7 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
     AGLogRuntimeMethods(buttonClass);
     AGLogRuntimeMethods(actionControlClass);
     AGLogRuntimeMethods(linkActionClass);
+    AGLogRuntimeMethods(objc_getClass("SBSystemActionAbstractDataSource"));
 
     self.originalButtonDown =
         (AGButtonEventIMP)method_getImplementation(downMethod);
