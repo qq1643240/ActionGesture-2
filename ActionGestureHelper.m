@@ -276,13 +276,16 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
 
 - (BOOL)executeCustomAction:(NSString *)action {
     NSDictionary *urlCandidates = @{
-        AGCustomActionWechatScan: @[ @"weixin://scanqrcode",
-                                     @"weixin://dl/scan" ],
-        AGCustomActionWechatPayCode: @[ @"weixin://pay" ],
+        AGCustomActionWechatScan: @[ @"weixin://dl/scan",
+                                     @"weixin://scanqrcode" ],
+        AGCustomActionWechatPayCode: @[ @"weixin://widget/pay",
+                                       @"weixin://pay" ],
         AGCustomActionAlipayScan:
-            @[ @"alipayqr://platformapi/startapp?saId=10000007" ],
+            @[ @"alipays://platformapi/startapp?saId=10000007",
+               @"alipayqr://platformapi/startapp?saId=10000007" ],
         AGCustomActionAlipayPayCode:
-            @[ @"alipayqr://platformapi/startapp?saId=20000056" ]
+            @[ @"alipays://platformapi/startapp?saId=20000056",
+               @"alipayqr://platformapi/startapp?saId=20000056" ]
     };
     NSDictionary *bundleIDs = @{
         AGCustomActionWechatScan: @"com.tencent.xin",
@@ -294,6 +297,10 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
     if (!candidates.count) return NO;
     Class workspaceClass = objc_getClass("LSApplicationWorkspace");
     SEL defaultWorkspaceSEL = sel_registerName("defaultWorkspace");
+    SEL openSensitiveURLSEL =
+        sel_registerName("openSensitiveURL:withOptions:error:");
+    SEL openURLWithOptionsSEL =
+        sel_registerName("openURL:withOptions:error:");
     SEL openURLSEL = sel_registerName("openURL:");
     SEL openBundleSEL = sel_registerName("openApplicationWithBundleID:");
     id workspace = nil;
@@ -301,21 +308,43 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
         id (*getWorkspace)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
         workspace = getWorkspace((id)workspaceClass, defaultWorkspaceSEL);
     }
-    if (workspace && [workspace respondsToSelector:openURLSEL]) {
-        BOOL (*openURL)(id, SEL, NSURL *) = (BOOL (*)(id, SEL, NSURL *))objc_msgSend;
-        for (NSString *candidate in candidates) {
-            NSURL *url = [NSURL URLWithString:candidate];
-            if (url && openURL(workspace, openURLSEL, url)) return YES;
+    for (NSString *candidate in candidates) {
+        NSURL *url = [NSURL URLWithString:candidate];
+        if (!url || !workspace) continue;
+        NSError *error = nil;
+        BOOL opened = NO;
+        if ([workspace respondsToSelector:openSensitiveURLSEL]) {
+            BOOL (*openSensitiveURL)(id, SEL, NSURL *, NSDictionary *, NSError **) =
+                (BOOL (*)(id, SEL, NSURL *, NSDictionary *, NSError **))objc_msgSend;
+            opened = openSensitiveURL(workspace, openSensitiveURLSEL, url, @{}, &error);
         }
+        if (!opened && [workspace respondsToSelector:openURLWithOptionsSEL]) {
+            error = nil;
+            BOOL (*openURLWithOptions)(id, SEL, NSURL *, NSDictionary *, NSError **) =
+                (BOOL (*)(id, SEL, NSURL *, NSDictionary *, NSError **))objc_msgSend;
+            opened = openURLWithOptions(workspace, openURLWithOptionsSEL, url, @{}, &error);
+        }
+        if (!opened && [workspace respondsToSelector:openURLSEL]) {
+            BOOL (*openURL)(id, SEL, NSURL *) =
+                (BOOL (*)(id, SEL, NSURL *))objc_msgSend;
+            opened = openURL(workspace, openURLSEL, url);
+        }
+        NSLog(@"[ActionGesture] custom action %@ URL %@ accepted=%@ error=%@",
+              action, candidate, opened ? @"YES" : @"NO", error);
+        if (opened) return YES;
     }
     if (workspace && [workspace respondsToSelector:openBundleSEL]) {
         NSString *bundleID = bundleIDs[action];
         if (bundleID.length) {
-            BOOL (*openBundle)(id, SEL, NSString *) =
-                (BOOL (*)(id, SEL, NSString *))objc_msgSend;
-            if (openBundle(workspace, openBundleSEL, bundleID)) return YES;
+            void (*openBundle)(id, SEL, NSString *) =
+                (void (*)(id, SEL, NSString *))objc_msgSend;
+            openBundle(workspace, openBundleSEL, bundleID);
+            NSLog(@"[ActionGesture] custom action %@ URL failed; opened %@ home",
+                  action, bundleID);
+            return YES;
         }
     }
+    NSLog(@"[ActionGesture] custom action %@ could not launch any target", action);
     return YES;
 }
 

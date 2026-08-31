@@ -12,12 +12,16 @@
 
 动作保存在 `com.huami.actiongesture` 的 `customAction.<gesture>.<direction>` 偏好中。选择“系统动作”会回到原有系统动作执行路径。
 
-当前默认 URL scheme：
+当前默认 URL scheme 候选（按顺序尝试）：
 
 ```text
+weixin://dl/scan
 weixin://scanqrcode
+weixin://widget/pay
 weixin://pay
+alipays://platformapi/startapp?saId=10000007
 alipayqr://platformapi/startapp?saId=10000007
+alipays://platformapi/startapp?saId=20000056
 alipayqr://platformapi/startapp?saId=20000056
 ```
 
