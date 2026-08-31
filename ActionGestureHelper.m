@@ -374,6 +374,52 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
 
     UIApplication *application = UIApplication.sharedApplication;
     SEL applicationOpenURLSEL = @selector(openURL:options:completionHandler:);
+
+    // Do not make a synchronous LaunchServices IPC call on SpringBoard's
+    // button-event thread.  floating-view can synchronously observe the same
+    // activation request, which otherwise deadlocks SpringBoard and appears
+    // as a frozen screen.  Dispatch the request off the main thread and
+    // consume the button event immediately.
+    if (workspace) {
+        NSString *candidate = candidates.firstObject;
+        NSURL *url = [NSURL URLWithString:candidate];
+        if (url) {
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                NSError *error = nil;
+                BOOL opened = NO;
+                if ([workspace respondsToSelector:openSensitiveURLErrorSEL]) {
+                    BOOL (*openSensitiveURL)(id, SEL, NSURL *, NSDictionary *, NSError **) =
+                        (BOOL (*)(id, SEL, NSURL *, NSDictionary *, NSError **))objc_msgSend;
+                    opened = openSensitiveURL(workspace, openSensitiveURLErrorSEL, url, nil, &error);
+                }
+                if (!opened && [workspace respondsToSelector:openSensitiveURLSEL]) {
+                    BOOL (*openSensitiveURL)(id, SEL, NSURL *, NSDictionary *) =
+                        (BOOL (*)(id, SEL, NSURL *, NSDictionary *))objc_msgSend;
+                    opened = openSensitiveURL(workspace, openSensitiveURLSEL, url, nil);
+                }
+                if (!opened && [workspace respondsToSelector:openURLErrorSEL]) {
+                    error = nil;
+                    BOOL (*openURLWithOptions)(id, SEL, NSURL *, NSDictionary *, NSError **) =
+                        (BOOL (*)(id, SEL, NSURL *, NSDictionary *, NSError **))objc_msgSend;
+                    opened = openURLWithOptions(workspace, openURLErrorSEL, url, nil, &error);
+                }
+                if (!opened && [workspace respondsToSelector:openURLWithOptionsSEL]) {
+                    BOOL (*openURLWithOptions)(id, SEL, NSURL *, NSDictionary *) =
+                        (BOOL (*)(id, SEL, NSURL *, NSDictionary *))objc_msgSend;
+                    opened = openURLWithOptions(workspace, openURLWithOptionsSEL, url, nil);
+                }
+                if (!opened && [workspace respondsToSelector:openURLSEL]) {
+                    BOOL (*openURL)(id, SEL, NSURL *) =
+                        (BOOL (*)(id, SEL, NSURL *))objc_msgSend;
+                    opened = openURL(workspace, openURLSEL, url);
+                }
+                AGWriteLog(@"[ActionGesture] background LaunchServices URL %@ accepted=%@ error=%@",
+                      candidate, opened ? @"YES" : @"NO", error);
+            });
+            return YES;
+        }
+    }
+
     for (NSString *candidate in candidates) {
         NSURL *url = [NSURL URLWithString:candidate];
         if (!url) continue;
@@ -411,38 +457,7 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
             return YES;
         }
 
-        if (!workspace) continue;
-        NSError *error = nil;
-        BOOL opened = NO;
-        if ([workspace respondsToSelector:openSensitiveURLErrorSEL]) {
-            BOOL (*openSensitiveURL)(id, SEL, NSURL *, NSDictionary *, NSError **) =
-                (BOOL (*)(id, SEL, NSURL *, NSDictionary *, NSError **))objc_msgSend;
-            opened = openSensitiveURL(workspace, openSensitiveURLErrorSEL, url, nil, &error);
-        }
-        if (!opened && [workspace respondsToSelector:openSensitiveURLSEL]) {
-            BOOL (*openSensitiveURL)(id, SEL, NSURL *, NSDictionary *) =
-                (BOOL (*)(id, SEL, NSURL *, NSDictionary *))objc_msgSend;
-            opened = openSensitiveURL(workspace, openSensitiveURLSEL, url, nil);
-        }
-        if (!opened && [workspace respondsToSelector:openURLErrorSEL]) {
-            error = nil;
-            BOOL (*openURLWithOptions)(id, SEL, NSURL *, NSDictionary *, NSError **) =
-                (BOOL (*)(id, SEL, NSURL *, NSDictionary *, NSError **))objc_msgSend;
-            opened = openURLWithOptions(workspace, openURLErrorSEL, url, nil, &error);
-        }
-        if (!opened && [workspace respondsToSelector:openURLWithOptionsSEL]) {
-            BOOL (*openURLWithOptions)(id, SEL, NSURL *, NSDictionary *) =
-                (BOOL (*)(id, SEL, NSURL *, NSDictionary *))objc_msgSend;
-            opened = openURLWithOptions(workspace, openURLWithOptionsSEL, url, nil);
-        }
-        if (!opened && [workspace respondsToSelector:openURLSEL]) {
-            BOOL (*openURL)(id, SEL, NSURL *) =
-                (BOOL (*)(id, SEL, NSURL *))objc_msgSend;
-            opened = openURL(workspace, openURLSEL, url);
-        }
-        AGWriteLog(@"[ActionGesture] custom action %@ URL %@ accepted=%@ error=%@",
-              action, candidate, opened ? @"YES" : @"NO", error);
-        if (opened) return YES;
+        if (workspace) continue;
     }
 
     // UIApplication fallback for environments where LaunchServices is not
