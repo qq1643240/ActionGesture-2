@@ -70,6 +70,8 @@ FOUNDATION_EXPORT void AGWriteLog(NSString *format, ...);
 
 - (BOOL)prepareSpringBoardRuntime;
 - (BOOL)canHandleButton:(SBRingerHardwareButton *)button;
+- (BOOL)nativeActionIsNothingOnButton:(SBRingerHardwareButton *)button
+                         configuration:(id)configuration;
 - (void)beginDirectionSampling;
 - (void)cancelDirectionSampling;
 - (BOOL)executeGesture:(NSString *)gesture

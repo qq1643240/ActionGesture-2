@@ -365,13 +365,6 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
         workspace = getWorkspace((id)workspaceClass, defaultWorkspaceSEL);
     }
 
-    if (workspace && [workspace respondsToSelector:establishConnectionSEL]) {
-        void (*establishConnection)(id, SEL) =
-            (void (*)(id, SEL))objc_msgSend;
-        establishConnection(workspace, establishConnectionSEL);
-        AGWriteLog(@"[ActionGesture] LSApplicationWorkspace connection established");
-    }
-
     UIApplication *application = UIApplication.sharedApplication;
     SEL applicationOpenURLSEL = @selector(openURL:options:completionHandler:);
 
@@ -385,6 +378,12 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
         NSURL *url = [NSURL URLWithString:candidate];
         if (url) {
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                if ([workspace respondsToSelector:establishConnectionSEL]) {
+                    void (*establishConnection)(id, SEL) =
+                        (void (*)(id, SEL))objc_msgSend;
+                    establishConnection(workspace, establishConnectionSEL);
+                    AGWriteLog(@"[ActionGesture] LSApplicationWorkspace connection established (background)");
+                }
                 NSError *error = nil;
                 BOOL opened = NO;
                 if ([workspace respondsToSelector:openSensitiveURLErrorSEL]) {
@@ -1160,6 +1159,20 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
            self.originalButtonLongPress && self.originalButtonUp;
 }
 
+- (BOOL)nativeActionIsNothingOnButton:(SBRingerHardwareButton *)button
+                         configuration:(AGGestureConfiguration *)configuration {
+    SBSystemActionAbstractDataSource *dataSource =
+        [self dataSourceForButton:button];
+    SEL selectedSEL = sel_registerName("selectedSystemAction");
+    if (dataSource && [dataSource respondsToSelector:selectedSEL]) {
+        id selected = ((id (*)(id, SEL))objc_msgSend)(dataSource, selectedSEL);
+        return selected == nil;
+    }
+    // Do not use hasSection here: on iOS 17 the section identifier may be
+    // absent even when the archive represents a valid native action.
+    return !configuration.hasArchive;
+}
+
 - (SBLinkSystemAction *)systemActionForAssignmentIdentifier:
                             (NSString *)assignmentIdentifier
                                       configuration:
@@ -1287,7 +1300,8 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
     // user selects Nothing.  The section identifier is the authoritative
     // marker: no section means no native system action, even when an old
     // archive is still present in SpringBoard preferences.
-    BOOL nativeActionIsNothing = !configuration.hasSection;
+    BOOL nativeActionIsNothing =
+        [self nativeActionIsNothingOnButton:button configuration:configuration];
     AGWriteLog(@"[ActionGesture] execute %@ direction=%@ resolved=%@ nativeSection=%@ nativeArchive=%@ customAction=%@",
           gesture, direction ?: @"all", resolvedDirection ?: @"baseline",
           configuration.hasSection ? @"YES" : @"NO",
