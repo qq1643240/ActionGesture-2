@@ -1172,8 +1172,17 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
             [dataSource updateSelectedAction];
         }
         id selected = ((id (*)(id, SEL))objc_msgSend)(dataSource, selectedSEL);
+        NSString *className = selected ? NSStringFromClass([selected class]) : nil;
         AGWriteLog(@"[ActionGesture] live native selection=%@",
-              selected ? NSStringFromClass([selected class]) : @"(none)");
+              className ?: @"(none)");
+        // iOS 17 represents the Action Button's Nothing assignment as an
+        // SBBlockSystemAction object, not nil.  Treat that concrete action
+        // as Nothing while preserving SBLinkSystemAction and other real
+        // native actions.
+        if ([className isEqualToString:@"SBBlockSystemAction"] ||
+            [className hasSuffix:@"BlockSystemAction"]) {
+            return YES;
+        }
         return selected == nil;
     }
     // Do not use hasSection here: on iOS 17 the section identifier may be
