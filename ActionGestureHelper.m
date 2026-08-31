@@ -276,8 +276,8 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
 
 - (BOOL)executeCustomAction:(NSString *)action {
     NSDictionary *urlCandidates = @{
-        AGCustomActionWechatScan: @[ @"weixin://dl/scan",
-                                     @"weixin://scanqrcode" ],
+        AGCustomActionWechatScan: @[ @"weixin://scanqrcode",
+                                     @"weixin://dl/scan" ],
         AGCustomActionWechatPayCode: @[ @"weixin://widget/pay",
                                        @"weixin://pay" ],
         AGCustomActionAlipayScan:
@@ -297,10 +297,13 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
     if (!candidates.count) return NO;
     Class workspaceClass = objc_getClass("LSApplicationWorkspace");
     SEL defaultWorkspaceSEL = sel_registerName("defaultWorkspace");
-    SEL openSensitiveURLSEL =
+    SEL establishConnectionSEL = sel_registerName("establishConnection");
+    SEL openSensitiveURLErrorSEL =
         sel_registerName("openSensitiveURL:withOptions:error:");
-    SEL openURLWithOptionsSEL =
-        sel_registerName("openURL:withOptions:error:");
+    SEL openSensitiveURLSEL =
+        sel_registerName("openSensitiveURL:withOptions:");
+    SEL openURLErrorSEL = sel_registerName("openURL:withOptions:error:");
+    SEL openURLWithOptionsSEL = sel_registerName("openURL:withOptions:");
     SEL openURLSEL = sel_registerName("openURL:");
     SEL openBundleSEL = sel_registerName("openApplicationWithBundleID:");
     id workspace = nil;
@@ -308,21 +311,72 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
         id (*getWorkspace)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
         workspace = getWorkspace((id)workspaceClass, defaultWorkspaceSEL);
     }
+
+    if (workspace && [workspace respondsToSelector:establishConnectionSEL]) {
+        void (*establishConnection)(id, SEL) =
+            (void (*)(id, SEL))objc_msgSend;
+        establishConnection(workspace, establishConnectionSEL);
+        NSLog(@"[ActionGesture] LSApplicationWorkspace connection established");
+    }
+
+    UIApplication *application = UIApplication.sharedApplication;
+    SEL applicationOpenURLSEL = @selector(openURL:options:completionHandler:);
     for (NSString *candidate in candidates) {
         NSURL *url = [NSURL URLWithString:candidate];
-        if (!url || !workspace) continue;
+        if (!url) continue;
+
+        // UIApplication is the public iOS 17 launch path.  The completion
+        // handler supplies the real acceptance result; on failure we still
+        // let the private workspace fallback try the same URL.
+        if (application && [application respondsToSelector:applicationOpenURLSEL]) {
+            void (^completion)(BOOL) = ^(BOOL success) {
+                NSLog(@"[ActionGesture] UIApplication URL %@ accepted=%@",
+                      candidate, success ? @"YES" : @"NO");
+                if (!success && workspace) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        if ([workspace respondsToSelector:openSensitiveURLErrorSEL]) {
+                            NSError *fallbackError = nil;
+                            BOOL (*openSensitiveURL)(id, SEL, NSURL *, NSDictionary *, NSError **) =
+                                (BOOL (*)(id, SEL, NSURL *, NSDictionary *, NSError **))objc_msgSend;
+                            BOOL fallbackOpened = openSensitiveURL(workspace,
+                                                                   openSensitiveURLErrorSEL,
+                                                                   url, nil,
+                                                                   &fallbackError);
+                            NSLog(@"[ActionGesture] workspace fallback URL %@ accepted=%@ error=%@",
+                                  candidate, fallbackOpened ? @"YES" : @"NO", fallbackError);
+                        }
+                    });
+                }
+            };
+            void (*openApplicationURL)(id, SEL, NSURL *, NSDictionary *, void (^)(BOOL)) =
+                (void (*)(id, SEL, NSURL *, NSDictionary *, void (^)(BOOL)))objc_msgSend;
+            openApplicationURL(application, applicationOpenURLSEL, url, nil, completion);
+            return YES;
+        }
+
+        if (!workspace) continue;
         NSError *error = nil;
         BOOL opened = NO;
-        if ([workspace respondsToSelector:openSensitiveURLSEL]) {
+        if ([workspace respondsToSelector:openSensitiveURLErrorSEL]) {
             BOOL (*openSensitiveURL)(id, SEL, NSURL *, NSDictionary *, NSError **) =
                 (BOOL (*)(id, SEL, NSURL *, NSDictionary *, NSError **))objc_msgSend;
-            opened = openSensitiveURL(workspace, openSensitiveURLSEL, url, @{}, &error);
+            opened = openSensitiveURL(workspace, openSensitiveURLErrorSEL, url, nil, &error);
         }
-        if (!opened && [workspace respondsToSelector:openURLWithOptionsSEL]) {
+        if (!opened && [workspace respondsToSelector:openSensitiveURLSEL]) {
+            BOOL (*openSensitiveURL)(id, SEL, NSURL *, NSDictionary *) =
+                (BOOL (*)(id, SEL, NSURL *, NSDictionary *))objc_msgSend;
+            opened = openSensitiveURL(workspace, openSensitiveURLSEL, url, nil);
+        }
+        if (!opened && [workspace respondsToSelector:openURLErrorSEL]) {
             error = nil;
             BOOL (*openURLWithOptions)(id, SEL, NSURL *, NSDictionary *, NSError **) =
                 (BOOL (*)(id, SEL, NSURL *, NSDictionary *, NSError **))objc_msgSend;
-            opened = openURLWithOptions(workspace, openURLWithOptionsSEL, url, @{}, &error);
+            opened = openURLWithOptions(workspace, openURLErrorSEL, url, nil, &error);
+        }
+        if (!opened && [workspace respondsToSelector:openURLWithOptionsSEL]) {
+            BOOL (*openURLWithOptions)(id, SEL, NSURL *, NSDictionary *) =
+                (BOOL (*)(id, SEL, NSURL *, NSDictionary *))objc_msgSend;
+            opened = openURLWithOptions(workspace, openURLWithOptionsSEL, url, nil);
         }
         if (!opened && [workspace respondsToSelector:openURLSEL]) {
             BOOL (*openURL)(id, SEL, NSURL *) =

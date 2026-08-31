@@ -25,7 +25,10 @@ alipays://platformapi/startapp?saId=20000056
 alipayqr://platformapi/startapp?saId=20000056
 ```
 
-付款码入口属于第三方 App 的非稳定 deep link；如果某个版本无效，需要只修改 `executeCustomAction:` 中的 URL，不要改动系统动作归档逻辑。
+跳转顺序为 iOS `UIApplication openURL:options:completionHandler:`，失败后再使用
+`LSApplicationWorkspace`（先建立连接，并兼容 iOS 17 的多组 selector）。付款码入口属于
+第三方 App 的非稳定 deep link；如果某个版本无效，需要只修改 `executeCustomAction:` 中的
+URL，不要改动系统动作归档逻辑。
 
 编译安装后必须重载 SpringBoard：
 
