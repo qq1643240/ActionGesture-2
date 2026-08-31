@@ -21,6 +21,8 @@ FOUNDATION_EXPORT NSString *const AGCustomActionWechatPayCode;
 FOUNDATION_EXPORT NSString *const AGCustomActionAlipayScan;
 FOUNDATION_EXPORT NSString *const AGCustomActionAlipayPayCode;
 
+FOUNDATION_EXPORT void AGWriteLog(NSString *format, ...);
+
 @interface ActionGestureHelper : NSObject
 
 @property (nonatomic, copy) NSString *currentGesture;

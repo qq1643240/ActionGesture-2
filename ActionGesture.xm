@@ -19,14 +19,14 @@ static id<AGHardwareButtonEvent> AGCurrentButtonDownEvent;
 - (void)performActionsForButtonDown:(id<AGHardwareButtonEvent>)buttonDown {
     ActionGestureHelper *helper = [ActionGestureHelper sharedHelper];
     if (![helper canHandleButton:self]) {
-        NSLog(@"[ActionGesture] Action Button hook bypassed: runtime not ready");
+        AGWriteLog(@"[ActionGesture] Action Button hook bypassed: runtime not ready");
         [helper cancelDirectionSampling];
         AGPassThroughNative = YES;
         %orig;
         return;
     }
 
-    NSLog(@"[ActionGesture] intercepted Action Button down (%@)", self);
+    AGWriteLog(@"[ActionGesture] intercepted Action Button down (%@)", self);
 
     [helper beginDirectionSampling];
     AGPassThroughNative = NO;
@@ -42,7 +42,7 @@ static id<AGHardwareButtonEvent> AGCurrentButtonDownEvent;
         if (AGImmediateSingleTriggered) {
             AGWaitingForSecondTap = NO;
             ++AGTapGeneration;
-            NSLog(@"[ActionGesture] immediate single custom action consumed ButtonDown");
+            AGWriteLog(@"[ActionGesture] immediate single custom action consumed ButtonDown");
         }
     }
 
@@ -136,7 +136,7 @@ static id<AGHardwareButtonEvent> AGCurrentButtonDownEvent;
         if (![helper executeGesture:AGGestureSingle
                            onButton:self
                               event:event]) {
-            NSLog(@"[ActionGesture] single gesture was not handled; replaying native tap");
+            AGWriteLog(@"[ActionGesture] single gesture was not handled; replaying native tap");
             [helper replayNativeTapOnButton:self
                                   downEvent:event
                                     upEvent:buttonUp];
@@ -167,12 +167,12 @@ static id<AGHardwareButtonEvent> AGCurrentButtonDownEvent;
 
                 ActionGestureHelper *helper = [ActionGestureHelper sharedHelper];
                 if ([helper prepareSpringBoardRuntime]) {
-                    NSLog(@"[ActionGesture] installing SBRingerHardwareButton hooks (retry %.2fs)",
+                    AGWriteLog(@"[ActionGesture] installing SBRingerHardwareButton hooks (retry %.2fs)",
                           delay);
                     %init(ActionGestureSpringBoard);
                     AGHooksInstalled = YES;
                 } else if (delay >= 2.0) {
-                    NSLog(@"[ActionGesture] SpringBoard runtime unavailable after retries; no hook installed");
+                    AGWriteLog(@"[ActionGesture] SpringBoard runtime unavailable after retries; no hook installed");
                 }
             });
         }

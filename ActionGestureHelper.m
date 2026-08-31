@@ -5,6 +5,7 @@
 #import <notify.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
+#import <stdarg.h>
 #if __has_include(<roothide.h>)
 #import <roothide.h>
 #else
@@ -32,6 +33,28 @@ NSString *const AGCustomActionWechatScan = @"wechat.scan";
 NSString *const AGCustomActionWechatPayCode = @"wechat.paycode";
 NSString *const AGCustomActionAlipayScan = @"alipay.scan";
 NSString *const AGCustomActionAlipayPayCode = @"alipay.paycode";
+
+void AGWriteLog(NSString *format, ...) {
+    va_list arguments;
+    va_start(arguments, format);
+    NSString *message = [[NSString alloc] initWithFormat:format arguments:arguments];
+    va_end(arguments);
+    if (!message) return;
+
+    NSString *line = [message stringByAppendingString:@"\n"];
+    @synchronized (ActionGestureHelper.class) {
+        NSString *path = @"/var/mobile/Library/Preferences/com.huami.actiongesture.runtime.log";
+        NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
+        if (!handle) {
+            [[NSFileManager defaultManager] createFileAtPath:path contents:nil attributes:nil];
+            handle = [NSFileHandle fileHandleForWritingAtPath:path];
+        }
+        [handle seekToEndOfFile];
+        [handle writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+        [handle closeFile];
+    }
+    NSLog(@"%@", message);
+}
 
 typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
                                  SEL,
@@ -316,7 +339,7 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
         void (*establishConnection)(id, SEL) =
             (void (*)(id, SEL))objc_msgSend;
         establishConnection(workspace, establishConnectionSEL);
-        NSLog(@"[ActionGesture] LSApplicationWorkspace connection established");
+        AGWriteLog(@"[ActionGesture] LSApplicationWorkspace connection established");
     }
 
     UIApplication *application = UIApplication.sharedApplication;
@@ -330,7 +353,7 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
         // let the private workspace fallback try the same URL.
         if (application && [application respondsToSelector:applicationOpenURLSEL]) {
             void (^completion)(BOOL) = ^(BOOL success) {
-                NSLog(@"[ActionGesture] UIApplication URL %@ accepted=%@",
+                AGWriteLog(@"[ActionGesture] UIApplication URL %@ accepted=%@",
                       candidate, success ? @"YES" : @"NO");
                 if (!success && workspace) {
                     dispatch_async(dispatch_get_main_queue(), ^{
@@ -342,7 +365,7 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
                                                                    openSensitiveURLErrorSEL,
                                                                    url, nil,
                                                                    &fallbackError);
-                            NSLog(@"[ActionGesture] workspace fallback URL %@ accepted=%@ error=%@",
+                            AGWriteLog(@"[ActionGesture] workspace fallback URL %@ accepted=%@ error=%@",
                                   candidate, fallbackOpened ? @"YES" : @"NO", fallbackError);
                         }
                     });
@@ -383,7 +406,7 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
                 (BOOL (*)(id, SEL, NSURL *))objc_msgSend;
             opened = openURL(workspace, openURLSEL, url);
         }
-        NSLog(@"[ActionGesture] custom action %@ URL %@ accepted=%@ error=%@",
+        AGWriteLog(@"[ActionGesture] custom action %@ URL %@ accepted=%@ error=%@",
               action, candidate, opened ? @"YES" : @"NO", error);
         if (opened) return YES;
     }
@@ -393,12 +416,12 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
             void (*openBundle)(id, SEL, NSString *) =
                 (void (*)(id, SEL, NSString *))objc_msgSend;
             openBundle(workspace, openBundleSEL, bundleID);
-            NSLog(@"[ActionGesture] custom action %@ URL failed; opened %@ home",
+            AGWriteLog(@"[ActionGesture] custom action %@ URL failed; opened %@ home",
                   action, bundleID);
             return YES;
         }
     }
-    NSLog(@"[ActionGesture] custom action %@ could not launch any target", action);
+    AGWriteLog(@"[ActionGesture] custom action %@ could not launch any target", action);
     return YES;
 }
 
@@ -1025,14 +1048,14 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
             @selector(performActionsForButtonUp:));
 
     if (!buttonClass || !downMethod || !longPressMethod || !upMethod) {
-        NSLog(@"[ActionGesture] SpringBoard hook unavailable: button=%@ down=%@ long=%@ up=%@",
+        AGWriteLog(@"[ActionGesture] SpringBoard hook unavailable: button=%@ down=%@ long=%@ up=%@",
               buttonClass, downMethod ? @"YES" : @"NO",
               longPressMethod ? @"YES" : @"NO",
               upMethod ? @"YES" : @"NO");
         return NO;
     }
 
-    NSLog(@"[ActionGesture] SpringBoard classes: button=%@ control=%@ linkAction=%@ controlIvar=%@ dataSourceIvar=%@ linkInit=%@",
+    AGWriteLog(@"[ActionGesture] SpringBoard classes: button=%@ control=%@ linkAction=%@ controlIvar=%@ dataSourceIvar=%@ linkInit=%@",
           buttonClass, actionControlClass, linkActionClass,
           class_getInstanceVariable(buttonClass, "_systemActionControl") ? @"YES" : @"NO",
           class_getInstanceVariable(actionControlClass, "_dataSource") ? @"YES" : @"NO",
@@ -1192,7 +1215,7 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
 
     NSString *customAction = [self customActionForGesture:gesture
                                                  direction:direction];
-    NSLog(@"[ActionGesture] execute %@ direction=%@ resolved=%@ nativeArchive=%@ customAction=%@",
+    AGWriteLog(@"[ActionGesture] execute %@ direction=%@ resolved=%@ nativeArchive=%@ customAction=%@",
           gesture, direction ?: @"all", resolvedDirection ?: @"baseline",
           configuration.hasArchive ? @"YES" : @"NO", customAction);
     if (![customAction isEqualToString:AGCustomActionNative] &&
@@ -1234,7 +1257,7 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
     // anything.
     if ([customAction isEqualToString:AGCustomActionNative] &&
         !configuration.hasArchive) {
-        NSLog(@"[ActionGesture] %@ resolved to Nothing; consuming event without native replay",
+        AGWriteLog(@"[ActionGesture] %@ resolved to Nothing; consuming event without native replay",
               gesture);
         return YES;
     }
