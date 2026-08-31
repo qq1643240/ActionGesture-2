@@ -1165,7 +1165,15 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
         [self dataSourceForButton:button];
     SEL selectedSEL = sel_registerName("selectedSystemAction");
     if (dataSource && [dataSource respondsToSelector:selectedSEL]) {
+        // The data source can retain the previous archived action after the
+        // user selects Nothing. Refresh it before inspecting the selection,
+        // otherwise Nothing is indistinguishable from a stale system action.
+        if ([dataSource respondsToSelector:@selector(updateSelectedAction)]) {
+            [dataSource updateSelectedAction];
+        }
         id selected = ((id (*)(id, SEL))objc_msgSend)(dataSource, selectedSEL);
+        AGWriteLog(@"[ActionGesture] live native selection=%@",
+              selected ? NSStringFromClass([selected class]) : @"(none)");
         return selected == nil;
     }
     // Do not use hasSection here: on iOS 17 the section identifier may be
