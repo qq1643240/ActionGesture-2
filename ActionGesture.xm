@@ -1,69 +1,66 @@
 #import <Foundation/Foundation.h>
+#import <objc/message.h>
+#import <objc/runtime.h>
+#import <unistd.h>
 
 #import "ActionGestureHelper.h"
+
+typedef void (*AGButtonIMP)(id, SEL, id);
+typedef void (*AGConfigureIMP)(id, SEL);
 
 static BOOL AGButtonIsDown;
 static BOOL AGDidRecognizeLongPress;
 static BOOL AGWaitingForSecondTap;
 static BOOL AGSecondTapInProgress;
 static BOOL AGPassThroughNative;
-static BOOL AGHooksInstalled;
 static BOOL AGImmediateSingleTriggered;
+static BOOL AGDirectHooksInstalled;
 static NSUInteger AGTapGeneration;
 static id<AGHardwareButtonEvent> AGCurrentButtonDownEvent;
+static AGButtonIMP AGOriginalButtonDown;
+static AGButtonIMP AGOriginalButtonLongPress;
+static AGButtonIMP AGOriginalButtonUp;
+static AGConfigureIMP AGOriginalConfigureButtonArbiter;
 
-%group ActionGestureSpringBoard
-
-%hook SBRingerHardwareButton
-
-- (void)performActionsForButtonDown:(id<AGHardwareButtonEvent>)buttonDown {
+static void AGHookButtonDown(id self, SEL _cmd, id event) {
     ActionGestureHelper *helper = [ActionGestureHelper sharedHelper];
-    if (![helper canHandleButton:self]) {
-        AGWriteLog(@"[ActionGesture] Action Button hook bypassed: runtime not ready");
-        [helper cancelDirectionSampling];
+    if (![helper canHandleButton:(SBRingerHardwareButton *)self]) {
+        AGWriteLog(@"[ActionGesture] ButtonDown bypassed: helper not ready");
         AGPassThroughNative = YES;
-        %orig;
+        if (AGOriginalButtonDown) AGOriginalButtonDown(self, _cmd, event);
         return;
     }
-
     AGWriteLog(@"[ActionGesture] intercepted Action Button down (%@)", self);
-
     [helper beginDirectionSampling];
     AGPassThroughNative = NO;
     AGButtonIsDown = YES;
     AGDidRecognizeLongPress = NO;
     AGImmediateSingleTriggered = NO;
-    AGCurrentButtonDownEvent = buttonDown;
+    AGCurrentButtonDownEvent = event;
     AGSecondTapInProgress = AGWaitingForSecondTap;
-
     if (!AGSecondTapInProgress && [helper shouldTriggerSingleActionImmediately]) {
-        AGImmediateSingleTriggered =
-            [helper executeGesture:AGGestureSingle onButton:self event:buttonDown];
+        AGImmediateSingleTriggered = [helper executeGesture:AGGestureSingle
+                                                    onButton:(SBRingerHardwareButton *)self
+                                                       event:event];
         if (AGImmediateSingleTriggered) {
             AGWaitingForSecondTap = NO;
             ++AGTapGeneration;
             AGWriteLog(@"[ActionGesture] immediate single custom action consumed ButtonDown");
         }
     }
-
     if (AGSecondTapInProgress) {
         AGWaitingForSecondTap = NO;
         ++AGTapGeneration;
     }
 }
 
-- (void)performActionsForButtonLongPress:
-    (id<AGHardwareButtonEvent>)longPress {
+static void AGHookButtonLongPress(id self, SEL _cmd, id event) {
+    ActionGestureHelper *helper = [ActionGestureHelper sharedHelper];
     if (AGPassThroughNative) {
-        [[ActionGestureHelper sharedHelper] cancelDirectionSampling];
-        %orig;
+        if (AGOriginalButtonLongPress) AGOriginalButtonLongPress(self, _cmd, event);
         return;
     }
-    if (!AGButtonIsDown) {
-        [[ActionGestureHelper sharedHelper] cancelDirectionSampling];
-        return;
-    }
-
+    if (!AGButtonIsDown) return;
     if (AGImmediateSingleTriggered) {
         AGDidRecognizeLongPress = YES;
         AGWaitingForSecondTap = NO;
@@ -71,106 +68,115 @@ static id<AGHardwareButtonEvent> AGCurrentButtonDownEvent;
         ++AGTapGeneration;
         return;
     }
-
     AGDidRecognizeLongPress = YES;
     AGWaitingForSecondTap = NO;
     AGSecondTapInProgress = NO;
     ++AGTapGeneration;
-
-    id<AGHardwareButtonEvent> event =
-        [longPress respondsToSelector:@selector(downTime)]
-            ? longPress
-            : AGCurrentButtonDownEvent;
-    ActionGestureHelper *helper = [ActionGestureHelper sharedHelper];
-    if (![helper executeGesture:AGGestureLong onButton:self event:event]) {
-        [helper replayNativeActionOnButton:self event:event];
+    id<AGHardwareButtonEvent> downEvent =
+        [event respondsToSelector:@selector(downTime)] ? event : AGCurrentButtonDownEvent;
+    if (![helper executeGesture:AGGestureLong
+                       onButton:(SBRingerHardwareButton *)self
+                          event:downEvent]) {
+        [helper replayNativeActionOnButton:(SBRingerHardwareButton *)self event:downEvent];
     }
 }
 
-- (void)performActionsForButtonUp:(id<AGHardwareButtonEvent>)buttonUp {
+static void AGHookButtonUp(id self, SEL _cmd, id event) {
+    ActionGestureHelper *helper = [ActionGestureHelper sharedHelper];
     if (AGPassThroughNative) {
-        [[ActionGestureHelper sharedHelper] cancelDirectionSampling];
         AGPassThroughNative = NO;
         AGCurrentButtonDownEvent = nil;
-        %orig;
+        if (AGOriginalButtonUp) AGOriginalButtonUp(self, _cmd, event);
         return;
     }
-    if (!AGButtonIsDown) {
-        [[ActionGestureHelper sharedHelper] cancelDirectionSampling];
-        return;
-    }
-
+    if (!AGButtonIsDown) return;
     BOOL recognizedLongPress = AGDidRecognizeLongPress;
     BOOL secondTap = AGSecondTapInProgress;
     BOOL immediateSingle = AGImmediateSingleTriggered;
-    id<AGHardwareButtonEvent> event = AGCurrentButtonDownEvent;
-
+    id<AGHardwareButtonEvent> downEvent = AGCurrentButtonDownEvent;
     AGButtonIsDown = NO;
     AGDidRecognizeLongPress = NO;
     AGSecondTapInProgress = NO;
     AGImmediateSingleTriggered = NO;
     AGCurrentButtonDownEvent = nil;
-
-    if (recognizedLongPress) return;
-    if (immediateSingle) return;
-
-    ActionGestureHelper *helper = [ActionGestureHelper sharedHelper];
+    if (recognizedLongPress || immediateSingle) return;
     if (secondTap) {
         if (![helper executeGesture:AGGestureDouble
-                           onButton:self
-                              event:event]) {
-            [helper replayNativeTapOnButton:self
-                                  downEvent:event
-                                    upEvent:buttonUp];
+                           onButton:(SBRingerHardwareButton *)self
+                              event:downEvent]) {
+            [helper replayNativeTapOnButton:(SBRingerHardwareButton *)self
+                                  downEvent:downEvent
+                                    upEvent:event];
         }
         return;
     }
-
     AGWaitingForSecondTap = YES;
     NSUInteger generation = ++AGTapGeneration;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 90 * NSEC_PER_MSEC),
                    dispatch_get_main_queue(), ^{
         if (AGTapGeneration != generation || !AGWaitingForSecondTap) return;
-
         AGWaitingForSecondTap = NO;
         if (![helper executeGesture:AGGestureSingle
-                           onButton:self
-                              event:event]) {
+                           onButton:(SBRingerHardwareButton *)self
+                              event:downEvent]) {
             AGWriteLog(@"[ActionGesture] single gesture was not handled; replaying native tap");
-            [helper replayNativeTapOnButton:self
-                                  downEvent:event
-                                    upEvent:buttonUp];
+            [helper replayNativeTapOnButton:(SBRingerHardwareButton *)self
+                                  downEvent:downEvent
+                                    upEvent:event];
         }
     });
 }
 
-%end
+static void AGHookConfigureButtonArbiter(id self, SEL _cmd) {
+    if (AGOriginalConfigureButtonArbiter) AGOriginalConfigureButtonArbiter(self, _cmd);
+    Ivar arbiterIvar = class_getInstanceVariable(object_getClass(self), "_buttonArbiter");
+    id arbiter = arbiterIvar ? object_getIvar(self, arbiterIvar) : nil;
+    SEL selector = sel_registerName("setMaximumRepeatedPressCount:");
+    if (arbiter && [arbiter respondsToSelector:selector]) {
+        ((void (*)(id, SEL, unsigned long))objc_msgSend)(arbiter, selector, 0UL);
+        AGWriteLog(@"[ActionGesture] button arbiter multi-click detection disabled");
+    }
+}
 
-%end
+static BOOL AGInstallDirectHooks(void) {
+    if (AGDirectHooksInstalled) return YES;
+    Class buttonClass = objc_getClass("SBRingerHardwareButton");
+    if (!buttonClass) return NO;
+    Method down = class_getInstanceMethod(buttonClass, @selector(performActionsForButtonDown:));
+    Method longPress = class_getInstanceMethod(buttonClass, @selector(performActionsForButtonLongPress:));
+    Method up = class_getInstanceMethod(buttonClass, @selector(performActionsForButtonUp:));
+    if (!down || !longPress || !up) return NO;
+    ActionGestureHelper *helper = [ActionGestureHelper sharedHelper];
+    if (![helper prepareSpringBoardRuntime]) return NO;
+    AGOriginalButtonDown = (AGButtonIMP)method_getImplementation(down);
+    AGOriginalButtonLongPress = (AGButtonIMP)method_getImplementation(longPress);
+    AGOriginalButtonUp = (AGButtonIMP)method_getImplementation(up);
+    method_setImplementation(down, (IMP)AGHookButtonDown);
+    method_setImplementation(longPress, (IMP)AGHookButtonLongPress);
+    method_setImplementation(up, (IMP)AGHookButtonUp);
+    Method configure = class_getInstanceMethod(buttonClass, sel_registerName("_configureButtonArbiter"));
+    if (configure) {
+        AGOriginalConfigureButtonArbiter = (AGConfigureIMP)method_getImplementation(configure);
+        method_setImplementation(configure, (IMP)AGHookConfigureButtonArbiter);
+    }
+    AGDirectHooksInstalled = YES;
+    AGWriteLog(@"[ActionGesture] direct runtime hooks installed; arbiterHook=%@",
+               configure ? @"YES" : @"NO");
+    return YES;
+}
 
-%ctor {
+__attribute__((constructor)) static void AGConstructor(void) {
     @autoreleasepool {
-        AGWriteLog(@"[ActionGesture] ctor bundle=%@ process=%d",
+        AGWriteLog(@"[ActionGesture] constructor bundle=%@ process=%d",
                    NSBundle.mainBundle.bundleIdentifier ?: @"(nil)", getpid());
-
-        // SpringBoard can load the Action Button classes after tweak
-        // constructors have run.  A one-shot %init would then silently miss
-        // the class forever, leaving only the native Dynamic Island feedback.
-        for (NSUInteger attempt = 0; attempt <= 8; attempt++) {
+        for (NSUInteger attempt = 0; attempt <= 12; attempt++) {
             NSTimeInterval delay = 0.25 * attempt;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
                                           (int64_t)(delay * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
-                if (AGHooksInstalled) return;
-
-                ActionGestureHelper *helper = [ActionGestureHelper sharedHelper];
-                if ([helper prepareSpringBoardRuntime]) {
-                    AGWriteLog(@"[ActionGesture] installing SBRingerHardwareButton hooks (retry %.2fs)",
-                          delay);
-                    %init(ActionGestureSpringBoard);
-                    AGHooksInstalled = YES;
-                } else if (delay >= 2.0) {
-                    AGWriteLog(@"[ActionGesture] SpringBoard runtime unavailable after retries; no hook installed");
+                if (AGDirectHooksInstalled) return;
+                if (!AGInstallDirectHooks() && attempt == 12) {
+                    AGWriteLog(@"[ActionGesture] direct hook install failed after retries");
                 }
             });
         }
