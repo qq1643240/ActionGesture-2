@@ -138,6 +138,31 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
 
 @implementation ActionGestureHelper
 
++ (void)load {
+    // +load is intentionally used in addition to the C constructor.  It is
+    // invoked by Objective-C image loading even when RootHide defers the
+    // tweak's constructor callbacks.
+    [self ag_bootstrapRuntime];
+}
+
++ (void)ag_bootstrapRuntime {
+    @autoreleasepool {
+        AGWriteLog(@"[ActionGesture] ObjC +load bootstrap process=%d", getpid());
+        for (NSUInteger attempt = 0; attempt <= 20; attempt++) {
+            NSTimeInterval delay = 0.25 * attempt;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                          (int64_t)(delay * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                if (!AGInstallDirectHooks()) {
+                    if (attempt == 20) {
+                        AGWriteLog(@"[ActionGesture] ObjC bootstrap failed after retries");
+                    }
+                }
+            });
+        }
+    }
+}
+
 + (instancetype)sharedHelper {
     static ActionGestureHelper *helper;
     static dispatch_once_t onceToken;

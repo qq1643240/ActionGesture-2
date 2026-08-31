@@ -138,7 +138,7 @@ static void AGHookConfigureButtonArbiter(id self, SEL _cmd) {
     }
 }
 
-static BOOL AGInstallDirectHooks(void) {
+BOOL AGInstallDirectHooks(void) {
     if (AGDirectHooksInstalled) return YES;
     Class buttonClass = objc_getClass("SBRingerHardwareButton");
     if (!buttonClass) return NO;
@@ -164,6 +164,13 @@ static BOOL AGInstallDirectHooks(void) {
                configure ? @"YES" : @"NO");
     return YES;
 }
+
+// RootHide may load the image after the normal C constructor phase has
+// already passed.  Expose a second Objective-C load entry point from the
+// helper class so SpringBoard always gets a chance to install the hooks.
+@interface ActionGestureHelper (RuntimeBootstrap)
++ (void)ag_bootstrapRuntime;
+@end
 
 __attribute__((constructor)) static void AGConstructor(void) {
     @autoreleasepool {

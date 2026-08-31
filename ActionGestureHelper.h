@@ -4,6 +4,9 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+// Implemented by ActionGesture.xm; used by the Objective-C +load bootstrap.
+FOUNDATION_EXPORT BOOL AGInstallDirectHooks(void);
+
 FOUNDATION_EXPORT NSString *const AGGestureSingle;
 FOUNDATION_EXPORT NSString *const AGGestureDouble;
 FOUNDATION_EXPORT NSString *const AGGestureLong;
@@ -24,6 +27,7 @@ FOUNDATION_EXPORT NSString *const AGCustomActionAlipayPayCode;
 FOUNDATION_EXPORT void AGWriteLog(NSString *format, ...);
 
 @interface ActionGestureHelper : NSObject
++ (void)ag_bootstrapRuntime;
 
 @property (nonatomic, copy) NSString *currentGesture;
 @property (nonatomic, copy) NSString *currentDirection;
