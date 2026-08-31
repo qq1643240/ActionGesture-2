@@ -101,7 +101,7 @@ static id<AGHardwareButtonEvent> AGCurrentButtonDownEvent;
 
     AGWaitingForSecondTap = YES;
     NSUInteger generation = ++AGTapGeneration;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_MSEC),
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 90 * NSEC_PER_MSEC),
                    dispatch_get_main_queue(), ^{
         if (AGTapGeneration != generation || !AGWaitingForSecondTap) return;
 
