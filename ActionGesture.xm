@@ -135,35 +135,23 @@ static id<AGHardwareButtonEvent> AGCurrentButtonDownEvent;
         // SpringBoard can load the Action Button classes after tweak
         // constructors have run.  A one-shot %init would then silently miss
         // the class forever, leaving only the native Dynamic Island feedback.
-        __block void (^installHooks)(NSUInteger);
-        installHooks = ^(NSUInteger attempt) {
-            if (AGHooksInstalled) return;
+        for (NSUInteger attempt = 0; attempt <= 8; attempt++) {
+            NSTimeInterval delay = 0.25 * attempt;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                          (int64_t)(delay * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                if (AGHooksInstalled) return;
 
-            ActionGestureHelper *helper = [ActionGestureHelper sharedHelper];
-            if ([helper prepareSpringBoardRuntime]) {
-                NSLog(@"[ActionGesture] installing SBRingerHardwareButton hooks (attempt %lu)",
-                      (unsigned long)(attempt + 1));
-                %init(ActionGestureSpringBoard);
-                AGHooksInstalled = YES;
-                return;
-            }
-
-            if (attempt < 8) {
-                NSTimeInterval delay = 0.25 * (attempt + 1);
-                NSLog(@"[ActionGesture] Action Button classes not ready; retry in %.2fs",
-                      delay);
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
-                                              (int64_t)(delay * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), ^{
-                    installHooks(attempt + 1);
-                });
-            } else {
-                NSLog(@"[ActionGesture] SpringBoard runtime unavailable after retries; no hook installed");
-            }
-        };
-
-        dispatch_async(dispatch_get_main_queue(), ^{
-            installHooks(0);
-        });
+                ActionGestureHelper *helper = [ActionGestureHelper sharedHelper];
+                if ([helper prepareSpringBoardRuntime]) {
+                    NSLog(@"[ActionGesture] installing SBRingerHardwareButton hooks (retry %.2fs)",
+                          delay);
+                    %init(ActionGestureSpringBoard);
+                    AGHooksInstalled = YES;
+                } else if (delay >= 2.0) {
+                    NSLog(@"[ActionGesture] SpringBoard runtime unavailable after retries; no hook installed");
+                }
+            });
+        }
     }
 }
