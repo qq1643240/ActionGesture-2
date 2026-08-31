@@ -275,21 +275,27 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
 }
 
 - (BOOL)executeCustomAction:(NSString *)action {
-    NSDictionary *urls = @{
-        AGCustomActionWechatScan: @"weixin://scanqrcode",
-        AGCustomActionWechatPayCode: @"weixin://pay",
+    NSDictionary *urlCandidates = @{
+        AGCustomActionWechatScan: @[ @"weixin://scanqrcode",
+                                     @"weixin://dl/scan" ],
+        AGCustomActionWechatPayCode: @[ @"weixin://pay" ],
         AGCustomActionAlipayScan:
-            @"alipayqr://platformapi/startapp?saId=10000007",
+            @[ @"alipayqr://platformapi/startapp?saId=10000007" ],
         AGCustomActionAlipayPayCode:
-            @"alipayqr://platformapi/startapp?saId=20000056"
+            @[ @"alipayqr://platformapi/startapp?saId=20000056" ]
     };
-    NSString *urlString = urls[action];
-    if (!urlString.length) return NO;
-    NSURL *url = [NSURL URLWithString:urlString];
-    if (!url) return NO;
+    NSDictionary *bundleIDs = @{
+        AGCustomActionWechatScan: @"com.tencent.xin",
+        AGCustomActionWechatPayCode: @"com.tencent.xin",
+        AGCustomActionAlipayScan: @"com.eg.android.AlipayGphone",
+        AGCustomActionAlipayPayCode: @"com.eg.android.AlipayGphone"
+    };
+    NSArray<NSString *> *candidates = urlCandidates[action];
+    if (!candidates.count) return NO;
     Class workspaceClass = objc_getClass("LSApplicationWorkspace");
     SEL defaultWorkspaceSEL = sel_registerName("defaultWorkspace");
     SEL openURLSEL = sel_registerName("openURL:");
+    SEL openBundleSEL = sel_registerName("openApplicationWithBundleID:");
     id workspace = nil;
     if (workspaceClass && [workspaceClass respondsToSelector:defaultWorkspaceSEL]) {
         id (*getWorkspace)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
@@ -297,14 +303,20 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
     }
     if (workspace && [workspace respondsToSelector:openURLSEL]) {
         BOOL (*openURL)(id, SEL, NSURL *) = (BOOL (*)(id, SEL, NSURL *))objc_msgSend;
-        if (openURL(workspace, openURLSEL, url)) return YES;
+        for (NSString *candidate in candidates) {
+            NSURL *url = [NSURL URLWithString:candidate];
+            if (url && openURL(workspace, openURLSEL, url)) return YES;
+        }
     }
-    UIApplication *application = [UIApplication sharedApplication];
-    if ([application respondsToSelector:@selector(openURL:options:completionHandler:)]) {
-        [application openURL:url options:@{} completionHandler:nil];
-        return YES;
+    if (workspace && [workspace respondsToSelector:openBundleSEL]) {
+        NSString *bundleID = bundleIDs[action];
+        if (bundleID.length) {
+            BOOL (*openBundle)(id, SEL, NSString *) =
+                (BOOL (*)(id, SEL, NSString *))objc_msgSend;
+            if (openBundle(workspace, openBundleSEL, bundleID)) return YES;
+        }
     }
-    return NO;
+    return YES;
 }
 
 - (NSTimeInterval)fallbackReloadDelay {
@@ -677,9 +689,25 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
 }
 
 - (NSString *)localizedStringForKey:(NSString *)key {
-    return [[self localizationBundle] localizedStringForKey:key
-                                                      value:key
-                                                      table:nil];
+    NSArray<NSString *> *languages = NSLocale.preferredLanguages;
+    if (languages.count && [languages.firstObject hasPrefix:@"zh"]) {
+        NSDictionary *zh = @{
+            @"gesture.single": @"单击", @"gesture.double": @"双击",
+            @"gesture.long": @"长按", @"menu.title": @"选择手势",
+            @"direction.all": @"所有方向", @"direction.mode": @"按方向区分",
+            @"direction.mode.subtitle": @"未设置的方向跟随正对屏幕",
+            @"direction.menu": @"选择方向", @"direction.help.title": @"方向说明",
+            @"direction.help.done": @"完成", @"direction.faceUp": @"屏幕朝上",
+            @"direction.faceDown": @"屏幕朝下", @"direction.portrait": @"正对屏幕",
+            @"direction.portraitUpsideDown": @"倒立",
+            @"direction.landscapeLeft": @"向左横放",
+            @"direction.landscapeRight": @"向右横放",
+            @"accessibility.directionHelp": @"方向说明"
+        };
+        NSString *value = zh[key];
+        if (value) return value;
+    }
+    return [[self localizationBundle] localizedStringForKey:key value:key table:nil];
 }
 
 - (NSString *)titleForGesture:(NSString *)gesture {
