@@ -1030,11 +1030,6 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
     }
 
     NSString *direction = [self finishDirectionSampling];
-    NSString *customAction = [self customActionForGesture:gesture
-                                                 direction:direction];
-    if (![customAction isEqualToString:AGCustomActionNative]) {
-        return [self executeCustomAction:customAction];
-    }
     NSString *resolvedDirection = nil;
     AGGestureConfiguration *configuration =
         [self effectiveConfigurationForGesture:gesture
@@ -1050,6 +1045,13 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
                                        synchronize:YES];
     }
     if (!configuration) return NO;
+
+    NSString *customAction = [self customActionForGesture:gesture
+                                                 direction:direction];
+    if (![customAction isEqualToString:AGCustomActionNative] &&
+        !configuration.hasArchive) {
+        return [self executeCustomAction:customAction];
+    }
 
     NSString *assignmentIdentifier =
         [self assignmentIdentifierForGesture:gesture
