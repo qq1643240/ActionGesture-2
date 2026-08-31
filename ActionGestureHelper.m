@@ -94,6 +94,8 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
 
 @property (nonatomic) BOOL hasSection;
 @property (nonatomic) BOOL hasArchive;
+@property (nonatomic) BOOL hasNativeState;
+@property (nonatomic) BOOL nativeIsNothing;
 @property (nonatomic, copy, nullable) NSString *sectionIdentifier;
 @property (nonatomic, copy, nullable) NSData *configuredActionArchive;
 
@@ -123,6 +125,7 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
 
 - (id)preferenceValueForKey:(NSString *)key;
 - (void)setPreferenceValue:(nullable id)value forKey:(NSString *)key;
+- (void)recordNativeActionSelection:(nullable id)selectedAction;
 - (NSString *)storageKeyForGesture:(NSString *)gesture
                          direction:(nullable NSString *)direction
                             suffix:(NSString *)suffix;
@@ -343,7 +346,7 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
 
 - (NSString *)titleForCustomAction:(NSString *)action {
     NSDictionary *titles = @{
-        AGCustomActionNative: @"系统动作",
+        AGCustomActionNative: @"无",
         AGCustomActionWechatScan: @"微信扫一扫",
         AGCustomActionWechatPayCode: @"微信付款码",
         AGCustomActionAlipayScan: @"支付宝扫一扫",
@@ -590,6 +593,14 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
                              direction:direction
                                 suffix:@"hasArchive"]]
             boolValue];
+    id nativeState =
+        [self preferenceValueForKey:
+            [self storageKeyForGesture:gesture
+                             direction:direction
+                                suffix:@"isNothing"]];
+    configuration.hasNativeState = [nativeState isKindOfClass:NSNumber.class];
+    configuration.nativeIsNothing = configuration.hasNativeState &&
+        [nativeState boolValue];
 
     id sectionIdentifier =
         [self preferenceValueForKey:
@@ -629,6 +640,10 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
         [sectionIdentifier isKindOfClass:NSString.class];
     configuration.hasArchive =
         [configuredActionArchive isKindOfClass:NSData.class];
+    id lastNativeState = [self preferenceValueForKey:@"lastNativeActionIsNothing"];
+    configuration.hasNativeState = [lastNativeState isKindOfClass:NSNumber.class];
+    configuration.nativeIsNothing = configuration.hasNativeState &&
+        [lastNativeState boolValue];
     configuration.sectionIdentifier =
         configuration.hasSection ? sectionIdentifier : nil;
     configuration.configuredActionArchive =
@@ -656,7 +671,13 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
     [self setPreferenceValue:@(configuration.hasArchive)
                       forKey:[self storageKeyForGesture:gesture
                                              direction:direction
-                                                suffix:@"hasArchive"]];
+                                suffix:@"hasArchive"]];
+    if (configuration.hasNativeState) {
+        [self setPreferenceValue:@(configuration.nativeIsNothing)
+                      forKey:[self storageKeyForGesture:gesture
+                                             direction:direction
+                                                suffix:@"isNothing"]];
+    }
     [self setPreferenceValue:configuration.hasSection
                                  ? configuration.sectionIdentifier
                                  : nil
@@ -709,7 +730,7 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
                           synchronize:(BOOL)synchronize {
     for (NSString *suffix in
             @[ @"initialized", @"hasSection", @"hasArchive",
-               @"section", @"archive" ]) {
+               @"section", @"archive", @"isNothing" ]) {
         [self setPreferenceValue:nil
                           forKey:[self storageKeyForGesture:gesture
                                                  direction:direction
@@ -724,7 +745,10 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
     isEqualToConfiguration:(AGGestureConfiguration *)otherConfiguration {
     if (!configuration || !otherConfiguration ||
         configuration.hasSection != otherConfiguration.hasSection ||
-        configuration.hasArchive != otherConfiguration.hasArchive) {
+        configuration.hasArchive != otherConfiguration.hasArchive ||
+        configuration.hasNativeState != otherConfiguration.hasNativeState ||
+        (configuration.hasNativeState &&
+         configuration.nativeIsNothing != otherConfiguration.nativeIsNothing)) {
         return NO;
     }
     BOOL sectionsEqual =
@@ -873,6 +897,20 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
 
 - (void)endSuppressingSystemActionSnapshots {
     self.suppressSystemActionSnapshots = NO;
+}
+
+- (void)recordNativeActionSelection:(id)selectedAction {
+    NSString *className = selectedAction
+        ? NSStringFromClass([selectedAction class])
+        : @"(none)";
+    BOOL isNothing = !selectedAction ||
+        [className isEqualToString:@"SBBlockSystemAction"] ||
+        [className hasSuffix:@"BlockSystemAction"];
+    [self setPreferenceValue:@(isNothing)
+                  forKey:@"lastNativeActionIsNothing"];
+    CFPreferencesAppSynchronize(CFSTR("com.huami.actiongesture"));
+    AGWriteLog(@"[ActionGesture] recorded native state nothing=%@ class=%@",
+          isNothing ? @"YES" : @"NO", className);
 }
 
 - (void)systemActionPreferenceDidChangeForKey:(NSString *)key {
@@ -1326,23 +1364,27 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
         return NO;
     }
 
-    NSArray<NSString *> *candidates = @[
-        @"execute", @"perform", @"run", @"invoke", @"activate",
-        @"performAction", @"executeAction"
-    ];
-    for (NSString *name in candidates) {
-        SEL selector = NSSelectorFromString(name);
-        Method method = class_getInstanceMethod(object_getClass(executor), selector);
-        if (!method || method_getNumberOfArguments(method) != 2 ||
-            ![executor respondsToSelector:selector]) {
-            continue;
-        }
-        AGWriteLog(@"[ActionGesture] invoking native executor %@ on %@",
-              name, NSStringFromClass([executor class]));
-        ((void (*)(id, SEL))objc_msgSend)(executor, selector);
+    SEL canExecuteSEL = sel_registerName("canBeExecuted");
+    if ([executor respondsToSelector:canExecuteSEL] &&
+        !((BOOL (*)(id, SEL))objc_msgSend)(executor, canExecuteSEL)) {
+        AGWriteLog(@"[ActionGesture] native executor reports canBeExecuted=NO");
+        return NO;
+    }
+
+    SEL executeSEL =
+        sel_registerName("executeWithContext:executionHandler:completion:");
+    Method executeMethod =
+        class_getInstanceMethod(object_getClass(executor), executeSEL);
+    if (executeMethod && method_getNumberOfArguments(executeMethod) == 5 &&
+        [executor respondsToSelector:executeSEL]) {
+        AGWriteLog(@"[ActionGesture] invoking native executor executeWithContext on %@",
+              NSStringFromClass([executor class]));
+        void (*execute)(id, SEL, id, id, id) =
+            (void (*)(id, SEL, id, id, id))objc_msgSend;
+        execute(executor, executeSEL, nil, nil, nil);
         return YES;
     }
-    AGWriteLog(@"[ActionGesture] no supported zero-argument executor method on %@",
+    AGWriteLog(@"[ActionGesture] native executor entry point unavailable on %@",
           NSStringFromClass([executor class]));
     return NO;
 }
@@ -1400,8 +1442,9 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
     // user selects Nothing.  The section identifier is the authoritative
     // marker: no section means no native system action, even when an old
     // archive is still present in SpringBoard preferences.
-    BOOL nativeActionIsNothing =
-        [self nativeActionIsNothingOnButton:button configuration:configuration];
+    BOOL nativeActionIsNothing = configuration.hasNativeState
+        ? configuration.nativeIsNothing
+        : [self nativeActionIsNothingOnButton:button configuration:configuration];
     AGWriteLog(@"[ActionGesture] execute %@ direction=%@ resolved=%@ nativeSection=%@ nativeArchive=%@ customAction=%@",
           gesture, direction ?: @"all", resolvedDirection ?: @"baseline",
           configuration.hasSection ? @"YES" : @"NO",
@@ -1413,8 +1456,7 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
     // archive would replace a working native action with an unusable object.
     // Only switch to a stored per-gesture action when both archive fields are
     // complete; otherwise leave the live native selection untouched.
-    if (!nativeActionIsNothing && configuration.hasSection &&
-        configuration.hasArchive) {
+    if (!nativeActionIsNothing && configuration.hasArchive) {
         NSString *assignmentIdentifier =
             [self assignmentIdentifierForGesture:gesture
                                        direction:resolvedDirection];
@@ -1426,6 +1468,8 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
             AGWriteLog(@"[ActionGesture] stored native action was not selected; preserving live action");
         } else {
             [self reloadSelectedActionOnButton:button];
+            AGWriteLog(@"[ActionGesture] selected stored native action for %@%@",
+                  gesture, resolvedDirection ? [NSString stringWithFormat:@"/%@", resolvedDirection] : @"");
         }
     }
 
@@ -1445,10 +1489,12 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
         AGWriteLog(@"[ActionGesture] native action is active; ignoring custom action %@",
               customAction);
     }
-    if ([self executeNativeSystemActionDirectlyOnButton:button]) {
-        AGWriteLog(@"[ActionGesture] native executor completed direct dispatch");
-        return YES;
-    }
+    // Keep the original SpringBoard event path for native actions.  The
+    // private executor's executeWithContext:... entry point requires an
+    // internal execution context/handler; calling it with nil arguments can
+    // silently do nothing (and would incorrectly consume the button event).
+    // Replaying the original button sequence lets SpringBoard construct its
+    // own context and preserves the native action behavior on iOS 17.
     BOOL replayed = [self replayNativeActionOnButton:button event:event];
     AGWriteLog(@"[ActionGesture] native action replay result=%@",
           replayed ? @"YES" : @"NO");

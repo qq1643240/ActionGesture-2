@@ -60,6 +60,7 @@ FOUNDATION_EXPORT void AGWriteLog(NSString *format, ...);
 - (BOOL)shouldTriggerSingleActionImmediately;
 - (void)beginSuppressingSystemActionSnapshots;
 - (void)endSuppressingSystemActionSnapshots;
+- (void)recordNativeActionSelection:(nullable id)selectedAction;
 - (void)systemActionPreferenceDidChangeForKey:(NSString *)key;
 
 - (NSString *)localizedStringForKey:(NSString *)key;

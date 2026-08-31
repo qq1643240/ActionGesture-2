@@ -7,6 +7,7 @@
 
 typedef void (*AGButtonIMP)(id, SEL, id);
 typedef void (*AGConfigureIMP)(id, SEL);
+typedef void (*AGSystemActionUpdateIMP)(id, SEL, id, id);
 
 static BOOL AGButtonIsDown;
 static BOOL AGDidRecognizeLongPress;
@@ -21,6 +22,7 @@ static AGButtonIMP AGOriginalButtonDown;
 static AGButtonIMP AGOriginalButtonLongPress;
 static AGButtonIMP AGOriginalButtonUp;
 static AGConfigureIMP AGOriginalConfigureButtonArbiter;
+static AGSystemActionUpdateIMP AGOriginalSystemActionUpdate;
 
 static void AGHookButtonDown(id self, SEL _cmd, id event) {
     ActionGestureHelper *helper = [ActionGestureHelper sharedHelper];
@@ -138,6 +140,15 @@ static void AGHookConfigureButtonArbiter(id self, SEL _cmd) {
     }
 }
 
+static void AGHookSystemActionUpdate(id self, SEL _cmd, id dataSource,
+                                     id selectedAction) {
+    if (AGOriginalSystemActionUpdate) {
+        AGOriginalSystemActionUpdate(self, _cmd, dataSource, selectedAction);
+    }
+    [[ActionGestureHelper sharedHelper]
+        recordNativeActionSelection:selectedAction];
+}
+
 BOOL AGInstallDirectHooks(void) {
     if (AGDirectHooksInstalled) return YES;
     Class buttonClass = objc_getClass("SBRingerHardwareButton");
@@ -159,9 +170,18 @@ BOOL AGInstallDirectHooks(void) {
         AGOriginalConfigureButtonArbiter = (AGConfigureIMP)method_getImplementation(configure);
         method_setImplementation(configure, (IMP)AGHookConfigureButtonArbiter);
     }
+    Class actionControlClass = objc_getClass("SBSystemActionControl");
+    Method actionUpdate = class_getInstanceMethod(
+        actionControlClass,
+        sel_registerName("systemActionDataSource:didUpdateSelectedAction:"));
+    if (actionUpdate) {
+        AGOriginalSystemActionUpdate =
+            (AGSystemActionUpdateIMP)method_getImplementation(actionUpdate);
+        method_setImplementation(actionUpdate, (IMP)AGHookSystemActionUpdate);
+    }
     AGDirectHooksInstalled = YES;
-    AGWriteLog(@"[ActionGesture] direct runtime hooks installed; arbiterHook=%@",
-               configure ? @"YES" : @"NO");
+    AGWriteLog(@"[ActionGesture] direct runtime hooks installed; arbiterHook=%@ actionUpdateHook=%@",
+               configure ? @"YES" : @"NO", actionUpdate ? @"YES" : @"NO");
     return YES;
 }
 
