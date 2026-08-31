@@ -6,6 +6,7 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <stdarg.h>
+#import <unistd.h>
 #if __has_include(<roothide.h>)
 #import <roothide.h>
 #else

@@ -150,10 +150,8 @@ static id<AGHardwareButtonEvent> AGCurrentButtonDownEvent;
 
 %ctor {
     @autoreleasepool {
-        if (![NSBundle.mainBundle.bundleIdentifier
-                isEqualToString:@"com.apple.springboard"]) {
-            return;
-        }
+        AGWriteLog(@"[ActionGesture] ctor bundle=%@ process=%d",
+                   NSBundle.mainBundle.bundleIdentifier ?: @"(nil)", getpid());
 
         // SpringBoard can load the Action Button classes after tweak
         // constructors have run.  A one-shot %init would then silently miss
