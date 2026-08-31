@@ -5,7 +5,6 @@
 #import <notify.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
-#import <roothide.h>
 
 NSString *const AGGestureSingle = @"single";
 NSString *const AGGestureDouble = @"double";
