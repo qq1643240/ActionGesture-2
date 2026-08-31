@@ -1204,6 +1204,15 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
         NSString *className = selected ? NSStringFromClass([selected class]) : nil;
         AGWriteLog(@"[ActionGesture] live native selection=%@",
               className ?: @"(none)");
+        SEL executorSEL = sel_registerName("executorForSystemAction:");
+        if (selected && [dataSource respondsToSelector:executorSEL]) {
+            id executor = ((id (*)(id, SEL, id))objc_msgSend)(dataSource,
+                                                               executorSEL,
+                                                               selected);
+            AGWriteLog(@"[ActionGesture] native executor=%@",
+                  executor ? NSStringFromClass([executor class]) : @"(nil)");
+            if (executor) AGLogRuntimeMethods([executor class]);
+        }
         // iOS 17 represents the Action Button's Nothing assignment as an
         // SBBlockSystemAction object, not nil.  Treat that concrete action
         // as Nothing while preserving SBLinkSystemAction and other real
