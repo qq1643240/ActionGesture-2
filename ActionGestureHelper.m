@@ -1302,6 +1302,51 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
     return YES;
 }
 
+- (BOOL)executeNativeSystemActionDirectlyOnButton:(SBRingerHardwareButton *)button {
+    SBSystemActionAbstractDataSource *dataSource =
+        [self dataSourceForButton:button];
+    SEL selectedSEL = sel_registerName("selectedSystemAction");
+    SEL executorSEL = sel_registerName("executorForSystemAction:");
+    if (!dataSource || ![dataSource respondsToSelector:selectedSEL] ||
+        ![dataSource respondsToSelector:executorSEL]) {
+        AGWriteLog(@"[ActionGesture] native executor unavailable: dataSource=%@",
+              dataSource ? @"YES" : @"NO");
+        return NO;
+    }
+
+    id selected = ((id (*)(id, SEL))objc_msgSend)(dataSource, selectedSEL);
+    if (!selected || [selected isKindOfClass:objc_getClass("SBBlockSystemAction")]) {
+        return NO;
+    }
+    id executor = ((id (*)(id, SEL, id))objc_msgSend)(dataSource,
+                                                       executorSEL,
+                                                       selected);
+    if (!executor) {
+        AGWriteLog(@"[ActionGesture] executorForSystemAction returned nil");
+        return NO;
+    }
+
+    NSArray<NSString *> *candidates = @[
+        @"execute", @"perform", @"run", @"invoke", @"activate",
+        @"performAction", @"executeAction"
+    ];
+    for (NSString *name in candidates) {
+        SEL selector = NSSelectorFromString(name);
+        Method method = class_getInstanceMethod(object_getClass(executor), selector);
+        if (!method || method_getNumberOfArguments(method) != 2 ||
+            ![executor respondsToSelector:selector]) {
+            continue;
+        }
+        AGWriteLog(@"[ActionGesture] invoking native executor %@ on %@",
+              name, NSStringFromClass([executor class]));
+        ((void (*)(id, SEL))objc_msgSend)(executor, selector);
+        return YES;
+    }
+    AGWriteLog(@"[ActionGesture] no supported zero-argument executor method on %@",
+          NSStringFromClass([executor class]));
+    return NO;
+}
+
 - (BOOL)replayNativeActionOnButton:(SBRingerHardwareButton *)button
                               event:(id<AGHardwareButtonEvent>)event {
     if (!self.originalButtonDown ||
@@ -1399,6 +1444,10 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
     if (![customAction isEqualToString:AGCustomActionNative]) {
         AGWriteLog(@"[ActionGesture] native action is active; ignoring custom action %@",
               customAction);
+    }
+    if ([self executeNativeSystemActionDirectlyOnButton:button]) {
+        AGWriteLog(@"[ActionGesture] native executor completed direct dispatch");
+        return YES;
     }
     BOOL replayed = [self replayNativeActionOnButton:button event:event];
     AGWriteLog(@"[ActionGesture] native action replay result=%@",
