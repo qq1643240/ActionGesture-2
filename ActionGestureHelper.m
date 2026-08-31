@@ -1323,50 +1323,49 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
           gesture, direction ?: @"all", resolvedDirection ?: @"baseline",
           configuration.hasSection ? @"YES" : @"NO",
           configuration.hasArchive ? @"YES" : @"NO", customAction);
-    if (![customAction isEqualToString:AGCustomActionNative] &&
-        nativeActionIsNothing) {
-        return [self executeCustomAction:customAction];
-    }
 
-    NSString *assignmentIdentifier =
-        [self assignmentIdentifierForGesture:gesture
-                                   direction:resolvedDirection];
-    BOOL selected =
-        [self selectConfiguration:configuration
-             assignmentIdentifier:assignmentIdentifier
-                         onButton:button];
-    if (!selected) {
-        BOOL applied = [self applyConfiguration:configuration];
-        if (applied) {
-            NSTimeInterval delay = [self fallbackReloadDelay];
-            __weak SBRingerHardwareButton *weakButton = button;
-            __weak ActionGestureHelper *weakSelf = self;
-            dispatch_after(
-                dispatch_time(DISPATCH_TIME_NOW,
-                              (int64_t)(delay * NSEC_PER_SEC)),
-                dispatch_get_main_queue(), ^{
-                    ActionGestureHelper *strongSelf = weakSelf;
-                    SBRingerHardwareButton *strongButton = weakButton;
-                    if (strongSelf && strongButton) {
-                        [strongSelf reloadSelectedActionOnButton:strongButton];
-                    }
-                });
+    // The live SpringBoard data source is authoritative at execution time.
+    // On iOS 17 the archived section key can be absent while the live object
+    // is still a valid SBLinkSystemAction. Re-applying that incomplete
+    // archive would replace a working native action with an unusable object.
+    // Only switch to a stored per-gesture action when both archive fields are
+    // complete; otherwise leave the live native selection untouched.
+    if (!nativeActionIsNothing && configuration.hasSection &&
+        configuration.hasArchive) {
+        NSString *assignmentIdentifier =
+            [self assignmentIdentifierForGesture:gesture
+                                       direction:resolvedDirection];
+        BOOL selected =
+            [self selectConfiguration:configuration
+                 assignmentIdentifier:assignmentIdentifier
+                             onButton:button];
+        if (!selected) {
+            AGWriteLog(@"[ActionGesture] stored native action was not selected; preserving live action");
+        } else {
+            [self reloadSelectedActionOnButton:button];
         }
-        selected = applied;
     }
 
-    // "Nothing" is represented by an empty native archive.  It is a real
-    // handled assignment, not a request to replay the original button event.
-    // Replaying here makes iOS show the Action Button/Dynamic Island feedback
-    // and was the reason the Nothing action appeared to flash without doing
-    // anything.
-    if ([customAction isEqualToString:AGCustomActionNative] &&
-        nativeActionIsNothing) {
+    if (nativeActionIsNothing) {
+        if (![customAction isEqualToString:AGCustomActionNative]) {
+            AGWriteLog(@"[ActionGesture] %@ has no native action; executing custom action %@",
+                  gesture, customAction);
+            return [self executeCustomAction:customAction];
+        }
+
         AGWriteLog(@"[ActionGesture] %@ resolved to Nothing; consuming event without native replay",
               gesture);
         return YES;
     }
-    return selected && [self replayNativeActionOnButton:button event:event];
+
+    if (![customAction isEqualToString:AGCustomActionNative]) {
+        AGWriteLog(@"[ActionGesture] native action is active; ignoring custom action %@",
+              customAction);
+    }
+    BOOL replayed = [self replayNativeActionOnButton:button event:event];
+    AGWriteLog(@"[ActionGesture] native action replay result=%@",
+          replayed ? @"YES" : @"NO");
+    return replayed;
 }
 
 - (void)replayNativeTapOnButton:(SBRingerHardwareButton *)button
