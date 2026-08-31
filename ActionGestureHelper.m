@@ -1245,11 +1245,17 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
 
     NSString *customAction = [self customActionForGesture:gesture
                                                  direction:direction];
-    AGWriteLog(@"[ActionGesture] execute %@ direction=%@ resolved=%@ nativeArchive=%@ customAction=%@",
+    // iOS 17 can leave a stale configured-action archive behind after the
+    // user selects Nothing.  The section identifier is the authoritative
+    // marker: no section means no native system action, even when an old
+    // archive is still present in SpringBoard preferences.
+    BOOL nativeActionIsNothing = !configuration.hasSection;
+    AGWriteLog(@"[ActionGesture] execute %@ direction=%@ resolved=%@ nativeSection=%@ nativeArchive=%@ customAction=%@",
           gesture, direction ?: @"all", resolvedDirection ?: @"baseline",
+          configuration.hasSection ? @"YES" : @"NO",
           configuration.hasArchive ? @"YES" : @"NO", customAction);
     if (![customAction isEqualToString:AGCustomActionNative] &&
-        !configuration.hasArchive) {
+        nativeActionIsNothing) {
         return [self executeCustomAction:customAction];
     }
 
@@ -1286,7 +1292,7 @@ typedef void (*AGButtonEventIMP)(SBRingerHardwareButton *,
     // and was the reason the Nothing action appeared to flash without doing
     // anything.
     if ([customAction isEqualToString:AGCustomActionNative] &&
-        !configuration.hasArchive) {
+        nativeActionIsNothing) {
         AGWriteLog(@"[ActionGesture] %@ resolved to Nothing; consuming event without native replay",
               gesture);
         return YES;
