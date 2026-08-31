@@ -5,6 +5,16 @@
 #import <notify.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
+#if __has_include(<roothide.h>)
+#import <roothide.h>
+#else
+static inline NSString *jbroot(NSString *path) {
+    if ([[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"]) {
+        return [@"/var/jb" stringByAppendingString:path];
+    }
+    return path;
+}
+#endif
 
 NSString *const AGGestureSingle = @"single";
 NSString *const AGGestureDouble = @"double";
